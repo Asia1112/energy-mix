@@ -1,0 +1,124 @@
+import { PieChart, Pie, Tooltip, Cell, ResponsiveContainer } from "recharts";
+import type { DailyEnergyMix } from "../../api/energyApi";
+import { getFuelColor } from "../../lib/fuelColors";
+import { formatLondonDay } from "../../lib/londonDate";
+
+interface Props {
+  day: DailyEnergyMix;
+  selectedFuels: string[];
+  onFuelSelect: (fuel: string) => void;
+  cleanEnergyLabel: string;
+  cleanestDayLabel?: string;
+  dateLocale: string;
+}
+
+interface PieLabelProps {
+  cx?: number;
+  cy?: number;
+  midAngle?: number;
+  outerRadius?: number;
+  value?: number;
+}
+
+const RADIAN = Math.PI / 180;
+
+function renderPieLabel({
+  cx = 0,
+  cy = 0,
+  midAngle = 0,
+  outerRadius = 0,
+  value = 0
+}: PieLabelProps) {
+  if (value < 2) {
+    return null;
+  }
+
+  const labelRadius = outerRadius + 26;
+  const x = cx + labelRadius * Math.cos(-midAngle * RADIAN);
+  const y = cy + labelRadius * Math.sin(-midAngle * RADIAN);
+
+  return (
+    <text
+      x={x}
+      y={y}
+      fill="var(--text)"
+      fontSize={13}
+      fontWeight={700}
+      textAnchor="middle"
+      dominantBaseline="central"
+    >
+      {value.toFixed(1)}
+    </text>
+  );
+}
+
+export function EnergyPieChart({
+  day,
+  selectedFuels,
+  onFuelSelect,
+  cleanEnergyLabel,
+  cleanestDayLabel,
+  dateLocale
+}: Props) {
+  const chartData = Object.entries(day.mix).map(([fuel, value]) => ({
+    name: fuel,
+    value
+  }));
+
+  return (
+    <div className={cleanestDayLabel ? "card cleanest-day-card" : "card"}>
+      {cleanestDayLabel && (
+        <p className="cleanest-day-label">{cleanestDayLabel}</p>
+      )}
+      <h2>{formatLondonDay(day.date, dateLocale)}</h2>
+
+      <p className="clean-energy-badge">
+        {cleanEnergyLabel} <strong>{day.cleanEnergyPercentage}%</strong>
+      </p>
+
+      <div className="chart">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart margin={{ top: 18, right: 34, bottom: 18, left: 34 }}>
+            <Pie
+              data={chartData}
+              dataKey="value"
+              nameKey="name"
+              outerRadius={76}
+              label={renderPieLabel}
+              labelLine={false}
+              isAnimationActive={false}
+              onClick={(entry) => {
+                if (entry.name) {
+                  onFuelSelect(entry.name);
+                }
+              }}
+              className="pie-slices"
+            >
+              {chartData.map((item) => (
+                <Cell
+                  key={item.name}
+                  fill={getFuelColor(item.name)}
+                  opacity={
+                    selectedFuels.length === 0 ||
+                    selectedFuels.includes(item.name)
+                      ? 1
+                      : 0.38
+                  }
+                />
+              ))}
+            </Pie>
+            <Tooltip
+              contentStyle={{
+                background: "var(--surface)",
+                border: "1px solid var(--border)",
+                borderRadius: "8px",
+                color: "var(--text-h)"
+              }}
+              itemStyle={{ color: "var(--text-h)" }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
