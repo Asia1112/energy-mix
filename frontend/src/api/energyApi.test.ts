@@ -1,21 +1,18 @@
-import axios from "axios";
+import { api } from "./apiClient";
 import { getChargingWindow, getEnergyMix } from "./energyApi";
 
-vi.mock("axios", () => ({
-  default: {
-    get: vi.fn()
-  }
+vi.mock("./apiClient", () => ({
+  api: { get: vi.fn() }
 }));
 
-const mockedAxios = vi.mocked(axios);
-const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const get = vi.mocked(api.get);
 
 describe("energyApi", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("fetches the energy mix from the backend API", async () => {
+  it("uses the shared client and forwards the cancellation signal", async () => {
     const data = [
       {
         date: "2026-07-03",
@@ -23,30 +20,26 @@ describe("energyApi", () => {
         cleanEnergyPercentage: 50
       }
     ];
+    const { signal } = new AbortController();
+    get.mockResolvedValueOnce({ data });
 
-    mockedAxios.get.mockResolvedValueOnce({ data });
-
-    await expect(getEnergyMix()).resolves.toEqual(data);
-    expect(mockedAxios.get).toHaveBeenCalledWith(`${apiUrl}/api/energy-mix`, {
-      timeout: 10000
-    });
+    await expect(getEnergyMix(signal)).resolves.toEqual(data);
+    expect(get).toHaveBeenCalledWith("/energy-mix", { signal });
   });
 
-  it("passes charging hours as a query parameter", async () => {
+  it("passes charging hours and the cancellation signal", async () => {
     const data = {
       start: "2026-07-04T00:00:00Z",
       end: "2026-07-04T03:00:00Z",
       averageCleanEnergyPercentage: 82.5
     };
+    const { signal } = new AbortController();
+    get.mockResolvedValueOnce({ data });
 
-    mockedAxios.get.mockResolvedValueOnce({ data });
-
-    await expect(getChargingWindow(3)).resolves.toEqual(data);
-    expect(mockedAxios.get).toHaveBeenCalledWith(
-      `${apiUrl}/api/charging-window?hours=3`,
-      {
-        timeout: 10000
-      }
-    );
+    await expect(getChargingWindow(3, signal)).resolves.toEqual(data);
+    expect(get).toHaveBeenCalledWith("/charging-window", {
+      params: { hours: 3 },
+      signal
+    });
   });
 });

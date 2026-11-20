@@ -1,5 +1,5 @@
 import type { DailyEnergyMix } from "../../api/energyApi";
-import type { Translations } from "../../i18n/i18n";
+import { useLanguage } from "../../hooks/useLanguage";
 import { LoadingState } from "../layout/LoadingState";
 import { EnergyLegend } from "./EnergyLegend";
 import { EnergyPieChart } from "./EnergyPieChart";
@@ -9,7 +9,6 @@ interface Props {
   error: boolean;
   loading: boolean;
   selectedFuels: string[];
-  t: Translations;
   onFuelSelect: (fuel: string) => void;
   onRetry: () => void;
 }
@@ -23,10 +22,10 @@ export function EnergyMixSection({
   error,
   loading,
   selectedFuels,
-  t,
   onFuelSelect,
   onRetry
 }: Props) {
+  const { t } = useLanguage();
   const fuels = getFuels(energyMix);
   const highestCleanEnergy = Math.max(
     ...energyMix.map((day) => day.cleanEnergyPercentage)

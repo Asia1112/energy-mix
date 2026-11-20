@@ -1,26 +1,31 @@
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { getChargingWindow } from "../../api/energyApi";
 import type { ChargingWindowResult } from "../../api/energyApi";
-import type { Translations } from "../../i18n/i18n";
+import { useLanguage } from "../../hooks/useLanguage";
+import { untilNextForecast } from "../../lib/forecastFreshness";
 import { formatLondonDateTime } from "../../lib/londonDate";
 
 interface Props {
-  t: Translations;
   onReserveWindow?: (result: ChargingWindowResult) => void;
 }
 
-type ChargingError = "validation" | "request";
-
-export function ChargingForm({ t, onReserveWindow }: Props) {
+export function ChargingForm({ onReserveWindow }: Props) {
+  const { t } = useLanguage();
   const [hours, setHours] = useState("3");
-  const [result, setResult] = useState<ChargingWindowResult | null>(null);
-  const [error, setError] = useState<ChargingError | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [requestedHours, setRequestedHours] = useState(0);
+  const [invalid, setInvalid] = useState(false);
+  const query = useQuery({
+    queryKey: ["charging-window", requestedHours],
+    queryFn: ({ signal }) => getChargingWindow(requestedHours, signal),
+    enabled: requestedHours > 0,
+    staleTime: untilNextForecast
+  });
+  const isSubmitting = query.isFetching;
+  const result = !isSubmitting && !query.isError ? query.data : undefined;
 
-  async function handleSubmit(event: React.FormEvent) {
+  function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
-    setError(null);
-    setResult(null);
 
     const hoursValue = Number(hours);
 
@@ -30,19 +35,16 @@ export function ChargingForm({ t, onReserveWindow }: Props) {
       hoursValue < 1 ||
       hoursValue > 6
     ) {
-      setError("validation");
+      setInvalid(true);
+      setRequestedHours(0);
       return;
     }
 
-    try {
-      setIsSubmitting(true);
-      const data = await getChargingWindow(hoursValue);
-      setResult(data);
-    } catch {
-      setError("request");
-    } finally {
-      setIsSubmitting(false);
+    setInvalid(false);
+    if (hoursValue === requestedHours && (query.isError || query.isStale)) {
+      void query.refetch();
     }
+    setRequestedHours(hoursValue);
   }
 
   return (
@@ -92,9 +94,9 @@ export function ChargingForm({ t, onReserveWindow }: Props) {
         </button>
       </form>
 
-      {error && (
+      {(invalid || query.isError) && (
         <p className="alert alert-error">
-          {error === "validation" ? t.chargingValidation : t.chargingError}
+          {invalid ? t.chargingValidation : t.chargingError}
         </p>
       )}
 

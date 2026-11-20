@@ -2,6 +2,10 @@ import { randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import request from "supertest";
 import { createApp } from "../src/app";
+import {
+  getLastBookableDay,
+  getLondonDate
+} from "../src/services/date.service";
 
 const databaseUrl = process.env.TEST_DATABASE_URL;
 const describeWithDatabase = databaseUrl ? describe : describe.skip;
@@ -63,6 +67,14 @@ describeWithDatabase("reservations on PostgreSQL", () => {
       durationHours
     });
   }
+
+  it("checks the real PostgreSQL connection without a reservation session", async () => {
+    await request(createApp(undefined, pool))
+      .get("/health/db")
+      .expect(200)
+      .expect("Cache-Control", "no-store")
+      .expect({ status: "ok", database: "up" });
+  });
 
   it("returns the seeded chargers and requires a signed session for private endpoints", async () => {
     const { body } = await request(app).get("/api/chargers").expect(200);
@@ -154,12 +166,57 @@ describeWithDatabase("reservations on PostgreSQL", () => {
     expect(body).toEqual([{ ...reservation, cancelledAt: expect.any(String) }]);
   });
 
+  it.each([
+    ["in-progress", "-30 minutes", "30 minutes"],
+    ["completed", "-2 hours", "-1 hour"]
+  ])(
+    "keeps a %s reservation and hides ownership from other sessions",
+    async (_status, startOffset, endOffset) => {
+      const [owner, other] = await Promise.all([openSession(), openSession()]);
+      const { body: reservation } = await book(
+        owner,
+        firstCharger,
+        at(20)
+      ).expect(201);
+
+      await pool.query(
+        `UPDATE reservations
+       SET created_at = statement_timestamp() - interval '3 hours',
+           start_at = statement_timestamp() + $2::interval,
+           end_at = statement_timestamp() + $3::interval
+       WHERE id = $1`,
+        [reservation.id, startOffset, endOffset]
+      );
+
+      await request(app)
+        .delete(`/api/reservations/${reservation.id}`)
+        .set("Cookie", other)
+        .expect(404);
+      await request(app)
+        .delete(`/api/reservations/${reservation.id}`)
+        .set("Cookie", owner)
+        .expect(409)
+        .expect({
+          message: "Reservations that have started cannot be cancelled."
+        });
+
+      const { body } = await request(app)
+        .get("/api/reservations")
+        .set("Cookie", owner)
+        .expect(200);
+      expect(body).toEqual([
+        expect.objectContaining({ id: reservation.id, cancelledAt: null })
+      ]);
+    }
+  );
+
   it("rejects unknown chargers, invalid timestamps, past starts and durations outside the allowed hours", async () => {
     const session = await openSession();
     await book(session, "unknown-charger", at(10)).expect(404);
     await book(session, firstCharger, "2099-02-30T12:00:00Z").expect(400);
     await book(session, firstCharger, "2020-01-01T00:00:00Z").expect(400);
     await book(session, firstCharger, at(10).slice(0, -1)).expect(400);
+    await book(session, firstCharger, at(24 * 62)).expect(400);
     await book(session, firstCharger, at(10), 0).expect(400);
     await book(session, firstCharger, at(10), 1.5).expect(400);
     await book(session, firstCharger, at(10), 7).expect(400);
@@ -169,5 +226,17 @@ describeWithDatabase("reservations on PostgreSQL", () => {
       .get(`/api/chargers/${firstCharger}/bookings`)
       .query({ from: at(11), to: at(10) })
       .expect(400);
+  });
+
+  it("rejects a reservation that ends after the last bookable day", async () => {
+    const session = await openSession();
+    const lastDay = getLastBookableDay(getLondonDate(new Date()));
+    // 22:00 UTC is 22:00 or 23:00 in London, so it is still on the last day.
+    const lateStart = `${lastDay}T22:00:00.000Z`;
+
+    await book(session, secondCharger, lateStart, 6)
+      .expect(400)
+      .expect((res) => expect(res.body.code).toBe("TOO_FAR_AHEAD"));
+    await book(session, secondCharger, lateStart, 1).expect(201);
   });
 });

@@ -25,6 +25,16 @@ export function getLondonDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// Keep in sync with getLastBookableDay in frontend/src/lib/reservationCalendar.ts.
+export function getLastBookableDay(today: string): string {
+  const date = new Date(`${today}T00:00:00Z`);
+  const month = date.getUTCMonth() + 1;
+  date.setUTCMonth(month);
+  // 31 Jan + 1 month overflows into March: clamp to the end of February.
+  if (date.getUTCMonth() !== month % 12) date.setUTCDate(0);
+  return date.toISOString().slice(0, 10);
+}
+
 // UTC is used here only to advance the calendar date, independent of DST.
 function addCalendarDays(date: string, days: number): string {
   const calendarDate = new Date(`${date}T00:00:00Z`);

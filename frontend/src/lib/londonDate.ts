@@ -1,22 +1,27 @@
 export const LONDON_TIME_ZONE = "Europe/London";
 
-const zoneFormatter = new Intl.DateTimeFormat("en-GB", {
-  timeZone: LONDON_TIME_ZONE,
-  timeZoneName: "short"
-});
+const formatters = new Map<string, Intl.DateTimeFormat>();
 
-export function formatLondonDay(date: string, locale: string): string {
-  return new Intl.DateTimeFormat(locale, {
-    timeZone: LONDON_TIME_ZONE,
-    dateStyle: "short"
-  }).format(new Date(`${date}T00:00:00Z`));
+// Intl formatters are costly to build, so they are cached.
+export function londonFormatter(
+  locale: string,
+  options: Intl.DateTimeFormatOptions
+): Intl.DateTimeFormat {
+  const key = `${locale}|${JSON.stringify(options)}`;
+  let formatter = formatters.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat(locale, {
+      ...options,
+      timeZone: LONDON_TIME_ZONE
+    });
+    formatters.set(key, formatter);
+  }
+  return formatter;
 }
 
-function formatLondonZone(instant: Date): string {
-  return (
-    zoneFormatter
-      .formatToParts(instant)
-      .find((part) => part.type === "timeZoneName")?.value ?? LONDON_TIME_ZONE
+export function formatLondonDay(date: string, locale: string): string {
+  return londonFormatter(locale, { dateStyle: "short" }).format(
+    new Date(`${date}T00:00:00Z`)
   );
 }
 
@@ -25,13 +30,9 @@ export function formatLondonTime(
   locale: string,
   hour12: boolean
 ): string {
-  const instant = new Date(date);
-  const time = new Intl.DateTimeFormat(locale, {
-    timeZone: LONDON_TIME_ZONE,
-    timeStyle: "short",
-    hour12
-  }).format(instant);
-  return `${time} ${formatLondonZone(instant)}`;
+  return londonFormatter(locale, { timeStyle: "short", hour12 }).format(
+    new Date(date)
+  );
 }
 
 export function formatLondonDateTime(
@@ -39,12 +40,9 @@ export function formatLondonDateTime(
   locale: string,
   hour12: boolean
 ): string {
-  const instant = new Date(date);
-  const dateTime = new Intl.DateTimeFormat(locale, {
-    timeZone: LONDON_TIME_ZONE,
+  return londonFormatter(locale, {
     dateStyle: "short",
     timeStyle: "short",
     hour12
-  }).format(instant);
-  return `${dateTime} ${formatLondonZone(instant)}`;
+  }).format(new Date(date));
 }

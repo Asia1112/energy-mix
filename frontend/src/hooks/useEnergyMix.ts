@@ -1,34 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { getEnergyMix } from "../api/energyApi";
-import type { DailyEnergyMix } from "../api/energyApi";
+import { untilNextForecast } from "../lib/forecastFreshness";
 
 export function useEnergyMix() {
-  const [energyMix, setEnergyMix] = useState<DailyEnergyMix[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-
-  const loadEnergyMix = useCallback(async () => {
-    setLoading(true);
-    setError(false);
-
-    try {
-      const data = await getEnergyMix();
-      setEnergyMix(data);
-    } catch {
-      setError(true);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadEnergyMix();
-  }, [loadEnergyMix]);
+  const query = useQuery({
+    queryKey: ["energy-mix"],
+    queryFn: ({ signal }) => getEnergyMix(signal),
+    staleTime: untilNextForecast
+  });
 
   return {
-    energyMix,
-    loading,
-    error,
-    retry: loadEnergyMix
+    energyMix: query.data ?? [],
+    loading: query.isPending || (query.isFetching && !query.data),
+    error: query.isError && !query.isFetching,
+    retry: query.refetch
   };
 }

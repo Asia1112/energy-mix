@@ -1,6 +1,7 @@
 import axios from "axios";
 import {
   CarbonApiError,
+  clearGenerationMixCache,
   fetchGenerationMix
 } from "../src/services/carbonApi.service";
 import type { GenerationInterval } from "../src/types/energy.types";
@@ -15,10 +16,36 @@ describe("fetchGenerationMix", () => {
   beforeEach(() => {
     delete process.env.CARBON_API_BASE_URL;
     mockedAxios.get.mockReset();
+    clearGenerationMixCache();
   });
 
   afterEach(() => {
     process.env.CARBON_API_BASE_URL = originalCarbonApiBaseUrl;
+    jest.useRealTimers();
+  });
+
+  it("reuses a response until the next half-hour interval and retries after errors", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-07-03T12:10:00Z"));
+    const from = "2026-07-03T12:30:00Z";
+    const to = "2026-07-05T12:00:00Z";
+    mockedAxios.get
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue({ data: { data: [] } });
+
+    await expect(fetchGenerationMix(from, to)).rejects.toThrow();
+    await Promise.all([
+      fetchGenerationMix(from, to),
+      fetchGenerationMix(from, to)
+    ]);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+
+    jest.setSystemTime(new Date("2026-07-03T12:29:59Z"));
+    await fetchGenerationMix(from, to);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+
+    jest.setSystemTime(new Date("2026-07-03T12:30:00Z"));
+    await fetchGenerationMix(from, to);
+    expect(mockedAxios.get).toHaveBeenCalledTimes(3);
   });
 
   it("requests the Carbon Intensity generation endpoint with timeout", async () => {

@@ -1,52 +1,84 @@
-import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import {
+  skipToken,
+  useMutation,
+  useQuery,
+  useQueryClient
+} from "@tanstack/react-query";
+import type { UseQueryResult } from "@tanstack/react-query";
+import {
+  useEffect,
+  useImperativeHandle,
+  useReducer,
+  useRef,
+  useState
+} from "react";
 import type { FormEvent, Ref } from "react";
 import type { ChargingWindowResult } from "../../api/energyApi";
 import {
   bookReservation,
   cancelReservation,
   getBookings,
-  getChargers,
   getReservations,
+  isReservationConfigError,
+  reservationErrorCode,
   reservationErrorStatus
 } from "../../api/reservationApi";
-import { useReservationQuery } from "../../hooks/useReservationQuery";
-import type { Language, Translations } from "../../i18n/i18n";
-import { reservationTranslations } from "../../i18n/reservationTranslations";
-import {
-  formatLondonDateTime,
-  formatLondonDay,
-  formatLondonTime
-} from "../../lib/londonDate";
+import type {
+  Booking,
+  Charger,
+  ReservationInput
+} from "../../api/reservationApi";
+import { useLanguage } from "../../hooks/useLanguage";
 import {
   addCalendarDays,
-  addCalendarMonths,
   getLondonDay,
-  getMonthStart,
+  getLastBookableDay,
   getStartTimes,
   getWeekStart,
   londonMidnight,
-  parseReservationDate,
   WEEK_DAYS
 } from "../../lib/reservationCalendar";
-import type { CalendarView } from "../../lib/reservationCalendar";
 import { ReservationCalendar } from "./ReservationCalendar";
+import { ReservationForm } from "./ReservationForm";
+import { ReservationHistory } from "./ReservationHistory";
+import { ReservationSummary } from "./ReservationSummary";
+import type { SlotAvailability } from "./ReservationSummary";
+import {
+  DURATIONS,
+  initialReservationState,
+  reservationReducer
+} from "./reservationState";
 import "./reservations.css";
 
-const DURATIONS = [1, 2, 3, 4, 5, 6];
 const HOUR_MS = 60 * 60_000;
+const SLOT_MS = 30 * 60_000;
+const bookingsKey = ["bookings"] as const;
+const reservationsKey = ["reservations"] as const;
+// Others may book meanwhile; the backend still rejects conflicts with 409.
+const BOOKINGS_STALE_MS = 30_000;
 
-type Feedback =
-  | "created"
-  | "removed"
-  | "occupied"
-  | "invalidTime"
-  | "createError"
-  | "cancelError"
-  | "sessionError";
+function getSlotAvailability(
+  start: string | null,
+  end: string | null,
+  query: UseQueryResult<Booking[]>
+): SlotAvailability {
+  if (!start || !end) return "idle";
+  // Background refetches keep the last known answer instead of blocking.
+  if (query.isFetching && !query.data) return "checking";
+  if (query.isError) return "error";
+  if (!query.data) return "checking";
+  const from = Date.parse(start);
+  const to = Date.parse(end);
+  return query.data.some(
+    (booking) =>
+      Date.parse(booking.startAt) < to && Date.parse(booking.endAt) > from
+  )
+    ? "booked"
+    : "available";
+}
 
 interface Props {
-  language: Language;
-  t: Translations;
+  chargers: UseQueryResult<Charger[]>;
   ref?: Ref<ReservationsHandle>;
 }
 
@@ -54,63 +86,157 @@ export interface ReservationsHandle {
   prefill: (result: ChargingWindowResult) => void;
 }
 
-function loadPeriodBookings(
-  signal: AbortSignal,
-  chargerId: string,
-  periodStart: string,
-  periodEnd: string
-) {
-  return getBookings(
-    chargerId,
-    londonMidnight(periodStart),
-    londonMidnight(periodEnd),
-    signal
+export function ReservationsSection({ chargers, ref }: Props) {
+  const { t } = useLanguage();
+  const copy = t.reservations;
+  const [state, dispatch] = useReducer(
+    reservationReducer,
+    undefined,
+    initialReservationState
   );
-}
-
-export function ReservationsSection({ language, t, ref }: Props) {
-  const copy = reservationTranslations[language];
   const chargerSelect = useRef<HTMLSelectElement>(null);
   const title = useRef<HTMLHeadingElement>(null);
-  const [selectedCharger, setSelectedCharger] = useState("");
-  const [day, setDay] = useState(() => getLondonDay(new Date()));
-  const [dateDraft, setDateDraft] = useState<string | null>(null);
-  const [dateInvalid, setDateInvalid] = useState(false);
-  const [browsedDay, setBrowsedDay] = useState<string | null>(null);
-  const [calendarView, setCalendarView] = useState<CalendarView>("week");
-  const [startAt, setStartAt] = useState("");
-  const [duration, setDuration] = useState(1);
-  const [pending, setPending] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
-
-  const chargers = useReservationQuery(getChargers);
-  const mine = useReservationQuery(getReservations);
-  const chargerId = selectedCharger || chargers.data?.[0]?.id || "";
   const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
+
   const today = getLondonDay(new Date(now));
-  const selectedDay = day < today ? today : day;
-  const calendarDay = browsedDay ?? selectedDay;
-  const periodStart =
-    calendarView === "month"
-      ? getMonthStart(calendarDay)
-      : getWeekStart(calendarDay);
-  const periodEnd =
-    calendarView === "month"
-      ? addCalendarMonths(periodStart, 1)
-      : addCalendarDays(periodStart, WEEK_DAYS);
-  const bookings = useReservationQuery(
-    chargerId ? loadPeriodBookings : null,
-    chargerId,
-    periodStart,
-    periodEnd
-  );
+  const selectedDay = state.day < today ? today : state.day;
+  const calendarDay = state.browsedDay ?? selectedDay;
+  const lastDay = getLastBookableDay(today);
+  const periodStart = getWeekStart(calendarDay);
+  const periodEnd = addCalendarDays(periodStart, WEEK_DAYS);
+  const chargerData = chargers.isError ? undefined : chargers.data;
+  const charger =
+    chargerData?.find(({ id }) => id === state.selectedCharger) ??
+    chargerData?.[0];
+  const chargerId = charger?.id ?? "";
   const startTimes = getStartTimes(selectedDay, now);
-  const formatDateTime = (date: string) =>
-    formatLondonDateTime(date, t.dateLocale, t.dateHour12);
+  const slotStart = startTimes.includes(state.startAt) ? state.startAt : null;
+  const slotEnd = slotStart
+    ? new Date(Date.parse(slotStart) + state.duration * HOUR_MS).toISOString()
+    : null;
+  const client = useQueryClient();
+  const reservationsAvailable =
+    !chargers.isPending && !isReservationConfigError(chargers.error);
+  const mine = useQuery({
+    queryKey: reservationsKey,
+    queryFn: ({ signal }) => getReservations(signal),
+    enabled: reservationsAvailable,
+    // Only this session's own changes affect it, and they invalidate it.
+    staleTime: Infinity
+  });
+  useEffect(() => {
+    // Refresh when a half-hour start time passes so it stops being offered.
+    let nextUpdate = Math.min(
+      now + 30_000,
+      (Math.floor(now / SLOT_MS) + 1) * SLOT_MS
+    );
+    for (const reservation of mine.data ?? []) {
+      if (reservation.cancelledAt) continue;
+      for (const boundary of [
+        Date.parse(reservation.startAt),
+        Date.parse(reservation.endAt)
+      ]) {
+        if (boundary > now) nextUpdate = Math.min(nextUpdate, boundary);
+      }
+    }
+
+    const timer = window.setTimeout(
+      () => setNow(Date.now()),
+      Math.max(0, nextUpdate - Date.now())
+    );
+    return () => window.clearTimeout(timer);
+  }, [mine.data, now]);
+  const periodFrom = londonMidnight(periodStart);
+  const periodTo = londonMidnight(periodEnd);
+  const bookings = useQuery({
+    queryKey: [...bookingsKey, chargerId, periodStart, periodEnd],
+    queryFn: ({ signal }) =>
+      getBookings(chargerId, periodFrom, periodTo, signal),
+    enabled: Boolean(chargerId),
+    staleTime: BOOKINGS_STALE_MS
+  });
+  // The loaded week answers availability unless the slot lies outside it.
+  const slotInPeriod =
+    slotStart !== null &&
+    slotEnd !== null &&
+    Date.parse(slotStart) >= Date.parse(periodFrom) &&
+    Date.parse(slotEnd) <= Date.parse(periodTo);
+  const slot = useQuery({
+    queryKey: [...bookingsKey, chargerId, "slot", slotStart, slotEnd],
+    queryFn:
+      chargerId && slotStart && slotEnd && !slotInPeriod
+        ? ({ signal }) => getBookings(chargerId, slotStart, slotEnd, signal)
+        : skipToken,
+    staleTime: BOOKINGS_STALE_MS
+  });
+  const availabilityQuery = slotInPeriod ? bookings : slot;
+  const availability = getSlotAvailability(
+    slotStart,
+    slotEnd,
+    availabilityQuery
+  );
+
+  function refreshReservations() {
+    return Promise.all([
+      client.invalidateQueries({ queryKey: reservationsKey }),
+      client.invalidateQueries({ queryKey: bookingsKey })
+    ]);
+  }
+
+  const create = useMutation({
+    mutationFn: (input: ReservationInput) => bookReservation(input),
+    onMutate: () => dispatch({ type: "feedback", feedback: null }),
+    onSuccess: () => {
+      dispatch({ type: "feedback", feedback: "created" });
+      return refreshReservations();
+    },
+    onError: (error) => {
+      switch (reservationErrorStatus(error)) {
+        case 400:
+          dispatch({
+            type: "feedback",
+            feedback:
+              reservationErrorCode(error) === "TOO_FAR_AHEAD"
+                ? "tooFar"
+                : "invalidTime"
+          });
+          break;
+        case 409:
+          dispatch({ type: "feedback", feedback: "occupied" });
+          return client.invalidateQueries({ queryKey: bookingsKey });
+        case 401:
+          dispatch({ type: "feedback", feedback: "sessionError" });
+          break;
+        default:
+          dispatch({ type: "feedback", feedback: "createError" });
+      }
+    }
+  });
+
+  const cancel = useMutation({
+    mutationFn: (id: string) => cancelReservation(id),
+    onMutate: () => dispatch({ type: "feedback", feedback: null }),
+    onSuccess: () => {
+      dispatch({ type: "feedback", feedback: "removed" });
+      return refreshReservations();
+    },
+    onError: (error) => {
+      const status = reservationErrorStatus(error);
+      if (status === 409) {
+        dispatch({ type: "feedback", feedback: "startedCancel" });
+        return client.invalidateQueries({ queryKey: reservationsKey });
+      }
+      dispatch({
+        type: "feedback",
+        feedback: status === 401 ? "sessionError" : "cancelError"
+      });
+    }
+  });
+  const pending = create.isPending
+    ? "create"
+    : cancel.isPending
+      ? (cancel.variables ?? null)
+      : null;
 
   useImperativeHandle(
     ref,
@@ -121,116 +247,49 @@ export function ReservationsSection({ language, t, ref }: Props) {
         const start = new Date(result.start);
         const hours = (Date.parse(result.end) - start.getTime()) / HOUR_MS;
         if (!DURATIONS.includes(hours)) {
-          setFeedback("invalidTime");
+          dispatch({ type: "feedback", feedback: "invalidTime" });
           return;
         }
 
-        const date = getLondonDay(start);
+        const day = getLondonDay(start);
         const time = start.toISOString();
-        if (!getStartTimes(date, Date.now()).includes(time)) {
-          setFeedback("invalidTime");
+        if (day > getLastBookableDay(getLondonDay(new Date()))) {
+          dispatch({ type: "feedback", feedback: "tooFar" });
+          return;
+        }
+        if (!getStartTimes(day, Date.now()).includes(time)) {
+          dispatch({ type: "feedback", feedback: "invalidTime" });
           return;
         }
 
-        setDay(date);
-        setDateDraft(null);
-        setDateInvalid(false);
-        setStartAt(time);
-        setDuration(hours);
-        setBrowsedDay(null);
-        setFeedback(null);
+        dispatch({ type: "prefill", day, time, hours });
       }
     }),
     []
   );
 
-  function chooseDay(date: string) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-    setDay(date < today ? today : date);
-    setDateDraft(null);
-    setDateInvalid(false);
-    setBrowsedDay(null);
-    setStartAt("");
-    setFeedback(null);
-  }
-
-  function commitDate() {
-    if (dateDraft === null) return;
-    const date = parseReservationDate(dateDraft);
-    if (!date || date < today) {
-      setDateInvalid(true);
-      return;
-    }
-
-    if (date !== selectedDay) chooseDay(date);
-    else {
-      setDateDraft(null);
-      setDateInvalid(false);
-    }
-  }
-
-  function chooseCalendarDay(date: string) {
-    if (date < today) setBrowsedDay(date);
-    else chooseDay(date);
-  }
-
-  async function handleBook(event: FormEvent<HTMLFormElement>) {
+  function handleBook(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!chargerId || pending || mine.loading || mine.error) return;
-    if (dateDraft !== null) {
-      commitDate();
+    if (!chargerId || pending || mine.isPending || mine.isError) return;
+    if (!slotStart || !slotEnd || Date.parse(slotStart) <= Date.now()) {
+      setNow(Date.now());
+      dispatch({ type: "feedback", feedback: "invalidTime" });
       return;
     }
-    if (!startTimes.includes(startAt)) {
-      setFeedback("invalidTime");
+    if (getLondonDay(new Date(Date.parse(slotEnd) - 1)) > lastDay) {
+      dispatch({ type: "feedback", feedback: "tooFar" });
       return;
     }
+    if (availability !== "available") return;
 
-    setPending("create");
-    setFeedback(null);
-    try {
-      await bookReservation({ chargerId, startAt, durationHours: duration });
-      setFeedback("created");
-      mine.reload();
-      bookings.reload();
-    } catch (error) {
-      switch (reservationErrorStatus(error)) {
-        case 400:
-          setFeedback("invalidTime");
-          break;
-        case 409:
-          setFeedback("occupied");
-          bookings.reload();
-          break;
-        case 401:
-          setFeedback("sessionError");
-          break;
-        default:
-          setFeedback("createError");
-      }
-    } finally {
-      setPending(null);
-    }
+    create.mutate({
+      chargerId,
+      startAt: slotStart,
+      durationHours: state.duration
+    });
   }
 
-  async function handleCancel(id: string) {
-    if (pending) return;
-    setPending(id);
-    setFeedback(null);
-    try {
-      await cancelReservation(id);
-      setFeedback("removed");
-      mine.reload();
-      bookings.reload();
-    } catch (error) {
-      setFeedback(
-        reservationErrorStatus(error) === 401 ? "sessionError" : "cancelError"
-      );
-    } finally {
-      setPending(null);
-    }
-  }
-
+  const { feedback } = state;
   const success = feedback === "created" || feedback === "removed";
 
   return (
@@ -242,140 +301,73 @@ export function ReservationsSection({ language, t, ref }: Props) {
         {copy.title}
       </h2>
 
-      {chargers.loading && <p aria-live="polite">{copy.loading}</p>}
-      {chargers.error && (
-        <div className="alert alert-error retry-alert">
-          <p>{copy.loadingChargersError}</p>
-          <button type="button" onClick={chargers.reload}>
+      {chargers.isLoading && <p aria-live="polite">{copy.loading}</p>}
+      {chargers.isError && (
+        <div className="alert alert-error retry-alert" role="alert">
+          <p>
+            {isReservationConfigError(chargers.error)
+              ? copy.missingConfig
+              : copy.loadingChargersError}
+          </p>
+          <button type="button" onClick={() => void chargers.refetch()}>
             {t.retry}
           </button>
         </div>
       )}
-      {chargers.data?.length === 0 && <p>{copy.noChargers}</p>}
+      {chargerData?.length === 0 && <p>{copy.noChargers}</p>}
 
-      {chargerId && (
-        <>
-          <form className="reservation-form" onSubmit={handleBook}>
-            <label className="field">
-              {copy.charger}
-              <select
-                ref={chargerSelect}
-                value={chargerId}
-                onChange={(event) => {
-                  setSelectedCharger(event.target.value);
-                  setFeedback(null);
-                }}
-              >
-                {chargers.data?.map((charger) => (
-                  <option key={charger.id} value={charger.id}>
-                    {charger.name} · {charger.location}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              {copy.date}
-              <input
-                type="text"
-                inputMode="numeric"
-                size={10}
-                placeholder={copy.dateFormat}
-                value={dateDraft ?? formatLondonDay(selectedDay, t.dateLocale)}
-                aria-invalid={dateInvalid || undefined}
-                aria-describedby={
-                  dateInvalid ? "reservation-date-error" : undefined
-                }
-                onChange={(event) => {
-                  setDateDraft(event.target.value);
-                  setDateInvalid(false);
-                }}
-                onBlur={commitDate}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && dateDraft !== null) {
-                    event.preventDefault();
-                    commitDate();
-                  }
-                }}
-              />
-            </label>
-            <label className="field">
-              {copy.time}
-              <select
-                value={startTimes.includes(startAt) ? startAt : ""}
-                onChange={(event) => setStartAt(event.target.value)}
-                required
-              >
-                <option value="">
-                  {startTimes.length ? copy.chooseTime : copy.noTimes}
-                </option>
-                {startTimes.map((time) => (
-                  <option key={time} value={time}>
-                    {formatLondonTime(time, t.dateLocale, t.dateHour12)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              {copy.duration}
-              <select
-                value={duration}
-                onChange={(event) => setDuration(Number(event.target.value))}
-              >
-                {DURATIONS.map((hours) => (
-                  <option key={hours} value={hours}>
-                    {hours} {copy.hours}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              className="reservation-submit"
-              type="submit"
-              disabled={
-                pending !== null ||
-                mine.loading ||
-                mine.error ||
-                startTimes.length === 0
+      {chargerData && charger && (
+        <div className="reservation-workspace">
+          <div className="reservation-schedule">
+            <ReservationForm
+              chargers={chargerData}
+              chargerId={chargerId}
+              chargerSelect={chargerSelect}
+              startTimes={startTimes}
+              state={state}
+              dispatch={dispatch}
+              onSubmit={handleBook}
+            />
+            <ReservationCalendar
+              today={today}
+              lastDay={lastDay}
+              day={calendarDay}
+              periodStart={periodStart}
+              periodEnd={periodEnd}
+              bookings={bookings.data ?? null}
+              onChooseDay={(day) =>
+                dispatch(
+                  day < today
+                    ? { type: "browseDay", day }
+                    : { type: "chooseDay", day }
+                )
               }
-              aria-busy={pending === "create"}
-            >
-              {copy.reserve}
-            </button>
-          </form>
-          {dateInvalid && (
-            <p
-              id="reservation-date-error"
-              className="alert alert-error"
-              role="alert"
-            >
-              {copy.invalidDate}
-            </p>
-          )}
-
-          <ReservationCalendar
-            today={today}
-            day={calendarDay}
-            view={calendarView}
-            periodStart={periodStart}
-            periodEnd={periodEnd}
-            bookings={bookings.data}
-            locale={t.dateLocale}
-            hour12={t.dateHour12}
-            t={copy}
-            onChooseDay={chooseCalendarDay}
-            onBrowseDay={setBrowsedDay}
-            onChangeView={setCalendarView}
+              onBrowseDay={(day) => dispatch({ type: "browseDay", day })}
+            />
+            {bookings.isLoading && <p aria-live="polite">{copy.loading}</p>}
+            {bookings.isError && (
+              <div className="alert alert-error retry-alert">
+                <p>{copy.loadingBookingsError}</p>
+                <button type="button" onClick={() => void bookings.refetch()}>
+                  {t.retry}
+                </button>
+              </div>
+            )}
+          </div>
+          <ReservationSummary
+            charger={charger}
+            day={selectedDay}
+            start={slotStart}
+            end={slotEnd}
+            duration={state.duration}
+            availability={availability}
+            disabled={pending !== null || mine.isPending || mine.isError}
+            submitting={create.isPending}
+            reservationsError={mine.isError}
+            onRetryAvailability={() => void availabilityQuery.refetch()}
+            onRetryReservations={() => void mine.refetch()}
           />
-          {bookings.loading && <p aria-live="polite">{copy.loading}</p>}
-          {bookings.error && (
-            <div className="alert alert-error retry-alert">
-              <p>{copy.loadingBookingsError}</p>
-              <button type="button" onClick={bookings.reload}>
-                {t.retry}
-              </button>
-            </div>
-          )}
-        </>
+        </div>
       )}
 
       {feedback && (
@@ -387,54 +379,15 @@ export function ReservationsSection({ language, t, ref }: Props) {
         </p>
       )}
 
-      <section className="reservation-history">
-        <h3>{copy.mine}</h3>
-        {mine.loading && <p aria-live="polite">{copy.loading}</p>}
-        {mine.error && (
-          <div className="alert alert-error retry-alert">
-            <p>{copy.loadingReservationsError}</p>
-            <button type="button" onClick={mine.reload}>
-              {t.retry}
-            </button>
-          </div>
-        )}
-        {mine.data?.length === 0 && <p>{copy.empty}</p>}
-        {mine.data && mine.data.length > 0 && (
-          <ul className="reservation-list">
-            {mine.data.map((reservation) => {
-              const charger = chargers.data?.find(
-                ({ id }) => id === reservation.chargerId
-              );
-              return (
-                <li key={reservation.id}>
-                  <div>
-                    <strong>{charger?.name ?? reservation.chargerId}</strong>
-                    {charger && <span> · {charger.location}</span>}
-                    <p>
-                      {formatDateTime(reservation.startAt)} –{" "}
-                      {formatDateTime(reservation.endAt)}
-                    </p>
-                  </div>
-                  {reservation.cancelledAt ? (
-                    <span className="reservation-state">{copy.cancelled}</span>
-                  ) : Date.parse(reservation.endAt) <= now ? (
-                    <span className="reservation-state">{copy.completed}</span>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled={pending !== null}
-                      aria-busy={pending === reservation.id}
-                      onClick={() => void handleCancel(reservation.id)}
-                    >
-                      {copy.cancel}
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+      {reservationsAvailable && (
+        <ReservationHistory
+          chargers={chargerData ?? []}
+          mine={mine}
+          now={now}
+          pending={pending}
+          onCancel={(id) => cancel.mutate(id)}
+        />
+      )}
     </section>
   );
 }

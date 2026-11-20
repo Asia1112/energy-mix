@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { translations } from "../../i18n/i18n";
+import { renderWithProviders } from "../../test/renderWithProviders";
 import { EnergyMixSection } from "./EnergyMixSection";
 
 vi.mock("./EnergyPieChart", () => ({
@@ -21,16 +22,16 @@ describe("EnergyMixSection", () => {
   it("shows error alert and wires retry button", () => {
     const onRetry = vi.fn();
 
-    render(
+    renderWithProviders(
       <EnergyMixSection
         energyMix={[]}
         error={true}
         loading={false}
         selectedFuels={[]}
-        t={translations.en}
         onFuelSelect={vi.fn()}
         onRetry={onRetry}
-      />
+      />,
+      "en"
     );
 
     expect(
@@ -45,16 +46,16 @@ describe("EnergyMixSection", () => {
   });
 
   it("shows loading state while data is loading", () => {
-    render(
+    renderWithProviders(
       <EnergyMixSection
         energyMix={[]}
         error={false}
         loading={true}
         selectedFuels={[]}
-        t={translations.en}
         onFuelSelect={vi.fn()}
         onRetry={vi.fn()}
-      />
+      />,
+      "en"
     );
 
     expect(screen.getByRole("status")).toHaveTextContent(
@@ -63,23 +64,23 @@ describe("EnergyMixSection", () => {
   });
 
   it("shows empty state when there is no data", () => {
-    render(
+    renderWithProviders(
       <EnergyMixSection
         energyMix={[]}
         error={false}
         loading={false}
         selectedFuels={[]}
-        t={translations.en}
         onFuelSelect={vi.fn()}
         onRetry={vi.fn()}
-      />
+      />,
+      "en"
     );
 
     expect(screen.getByText(translations.en.emptyState)).toBeInTheDocument();
   });
 
   it("renders one chart per day and deduplicates fuels across days", () => {
-    render(
+    renderWithProviders(
       <EnergyMixSection
         energyMix={[
           {
@@ -96,10 +97,10 @@ describe("EnergyMixSection", () => {
         error={false}
         loading={false}
         selectedFuels={["solar"]}
-        t={translations.en}
         onFuelSelect={vi.fn()}
         onRetry={vi.fn()}
-      />
+      />,
+      "en"
     );
 
     expect(screen.getAllByTestId("energy-chart")).toHaveLength(2);
@@ -116,7 +117,7 @@ describe("EnergyMixSection", () => {
   });
 
   it("highlights all days tied for the highest clean energy share", () => {
-    render(
+    renderWithProviders(
       <EnergyMixSection
         energyMix={[
           { date: "2026-07-03", mix: { wind: 60 }, cleanEnergyPercentage: 60 },
@@ -126,7 +127,6 @@ describe("EnergyMixSection", () => {
         error={false}
         loading={false}
         selectedFuels={[]}
-        t={translations.pl}
         onFuelSelect={vi.fn()}
         onRetry={vi.fn()}
       />

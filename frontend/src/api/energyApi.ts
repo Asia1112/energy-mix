@@ -1,7 +1,4 @@
-import axios from "axios";
-
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
-const REQUEST_TIMEOUT_MS = 10000;
+import { api } from "./apiClient";
 
 export interface DailyEnergyMix {
   date: string;
@@ -15,21 +12,23 @@ export interface ChargingWindowResult {
   averageCleanEnergyPercentage: number;
 }
 
-export async function getEnergyMix(): Promise<DailyEnergyMix[]> {
-  const response = await axios.get(`${API_URL}/api/energy-mix`, {
-    timeout: REQUEST_TIMEOUT_MS
-  });
-  return response.data;
+export async function getEnergyMix(
+  signal: AbortSignal
+): Promise<DailyEnergyMix[]> {
+  const { data } = await api.get<DailyEnergyMix[]>("/energy-mix", { signal });
+  if (!Array.isArray(data)) throw new Error("Invalid energy mix response");
+  return data;
 }
 
 export async function getChargingWindow(
-  hours: number
+  hours: number,
+  signal: AbortSignal
 ): Promise<ChargingWindowResult> {
-  const response = await axios.get(
-    `${API_URL}/api/charging-window?hours=${hours}`,
-    {
-      timeout: REQUEST_TIMEOUT_MS
-    }
-  );
-  return response.data;
+  const { data } = await api.get<ChargingWindowResult>("/charging-window", {
+    params: { hours },
+    signal
+  });
+  if (!data?.start || !data.end)
+    throw new Error("Invalid charging window response");
+  return data;
 }

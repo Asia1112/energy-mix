@@ -1,19 +1,13 @@
-import type { Translations } from "../../i18n/i18n";
+import { useLanguage } from "../../hooks/useLanguage";
 import type { Theme } from "../../lib/theme";
 
 interface Props {
-  t: Translations;
   theme: Theme;
-  onLanguageToggle: () => void;
   onThemeToggle: () => void;
 }
 
-export function AppHeader({
-  t,
-  theme,
-  onLanguageToggle,
-  onThemeToggle
-}: Props) {
+export function AppHeader({ theme, onThemeToggle }: Props) {
+  const { t, toggleLanguage } = useLanguage();
   return (
     <div className="app-header">
       <h1>Energy Mix UK</h1>
@@ -33,7 +27,7 @@ export function AppHeader({
         <button
           className="language-toggle"
           type="button"
-          onClick={onLanguageToggle}
+          onClick={toggleLanguage}
           aria-label={t.languageToggleLabel}
         >
           {t.languageToggleText}

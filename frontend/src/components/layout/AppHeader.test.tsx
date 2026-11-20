@@ -1,16 +1,13 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
 import { translations } from "../../i18n/i18n";
+import { renderWithProviders } from "../../test/renderWithProviders";
 import { AppHeader } from "./AppHeader";
 
 describe("AppHeader", () => {
   it("renders theme and language controls with labels", () => {
-    render(
-      <AppHeader
-        t={translations.en}
-        theme="light"
-        onLanguageToggle={vi.fn()}
-        onThemeToggle={vi.fn()}
-      />
+    renderWithProviders(
+      <AppHeader theme="light" onThemeToggle={vi.fn()} />,
+      "en"
     );
 
     expect(
@@ -21,17 +18,12 @@ describe("AppHeader", () => {
     ).toHaveTextContent(translations.en.languageToggleText);
   });
 
-  it("fires toggle callbacks on click", () => {
-    const onLanguageToggle = vi.fn();
+  it("toggles theme via the callback and language via context", () => {
     const onThemeToggle = vi.fn();
 
-    render(
-      <AppHeader
-        t={translations.en}
-        theme="dark"
-        onLanguageToggle={onLanguageToggle}
-        onThemeToggle={onThemeToggle}
-      />
+    renderWithProviders(
+      <AppHeader theme="dark" onThemeToggle={onThemeToggle} />,
+      "en"
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Turn on light mode" }));
@@ -40,6 +32,6 @@ describe("AppHeader", () => {
     );
 
     expect(onThemeToggle).toHaveBeenCalled();
-    expect(onLanguageToggle).toHaveBeenCalled();
+    expect(document.documentElement.lang).toBe("pl");
   });
 });

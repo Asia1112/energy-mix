@@ -1,53 +1,41 @@
 import type { Booking } from "../../api/reservationApi";
-import type { ReservationTranslations } from "../../i18n/reservationTranslations";
+import { useLanguage } from "../../hooks/useLanguage";
 import {
   formatLondonDateTime,
   formatLondonDay,
-  LONDON_TIME_ZONE
+  londonFormatter
 } from "../../lib/londonDate";
 import {
   addCalendarDays,
-  addCalendarMonths,
-  getWeekStart,
+  getDayOccupancy,
   londonMidnight,
   WEEK_DAYS
 } from "../../lib/reservationCalendar";
-import type { CalendarView } from "../../lib/reservationCalendar";
 
 interface Props {
   today: string;
   day: string;
-  view: CalendarView;
+  lastDay: string;
   periodStart: string;
   periodEnd: string;
   bookings: Booking[] | null;
-  locale: string;
-  hour12: boolean;
-  t: ReservationTranslations;
   onChooseDay: (day: string) => void;
   onBrowseDay: (day: string) => void;
-  onChangeView: (view: CalendarView) => void;
 }
 
 export function ReservationCalendar({
   today,
   day,
-  view,
+  lastDay,
   periodStart,
   periodEnd,
   bookings,
-  locale,
-  hour12,
-  t,
   onChooseDay,
-  onBrowseDay,
-  onChangeView
+  onBrowseDay
 }: Props) {
-  const isMonth = view === "month";
-  const gridStart = getWeekStart(periodStart);
-  const weekdays = Array.from({ length: WEEK_DAYS }, (_, offset) =>
-    addCalendarDays(gridStart, offset)
-  );
+  const {
+    t: { reservations: copy, dateLocale: locale, dateHour12: hour12 }
+  } = useLanguage();
   const dates = [];
   for (
     let date = periodStart;
@@ -56,81 +44,46 @@ export function ReservationCalendar({
   ) {
     dates.push(date);
   }
-  const weekdayFormatter = new Intl.DateTimeFormat(locale, {
-    timeZone: LONDON_TIME_ZONE,
-    weekday: "short"
-  });
-  const monthLabel = new Intl.DateTimeFormat(locale, {
-    timeZone: LONDON_TIME_ZONE,
-    month: "long",
+  const weekdayFormatter = londonFormatter(locale, { weekday: "short" });
+  const periodFormat = londonFormatter(locale, {
+    day: "numeric",
+    month: "short",
     year: "numeric"
-  }).format(new Date(londonMidnight(periodStart)));
+  });
+  const weekLabel = periodFormat.formatRange(
+    new Date(londonMidnight(periodStart)),
+    new Date(londonMidnight(addCalendarDays(periodEnd, -1)))
+  );
 
   function formatWeekday(date: string) {
     return weekdayFormatter.format(new Date(londonMidnight(date)));
   }
 
   function movePeriod(direction: -1 | 1) {
-    onBrowseDay(
-      isMonth
-        ? addCalendarMonths(periodStart, direction)
-        : addCalendarDays(day, direction * WEEK_DAYS)
-    );
+    onBrowseDay(addCalendarDays(day, direction * WEEK_DAYS));
   }
 
-  function bookingsOn(date: string) {
-    const from = Date.parse(londonMidnight(date));
-    const to = Date.parse(londonMidnight(addCalendarDays(date, 1)));
-    return (bookings ?? []).filter(
-      (booking) =>
-        Date.parse(booking.startAt) < to && Date.parse(booking.endAt) > from
-    );
-  }
-
-  const selectedBookings = bookingsOn(day);
+  const selectedBookings = getDayOccupancy(day, bookings ?? []).bookings;
 
   return (
     <section className="reservation-calendar">
       <div className="reservation-calendar-header">
-        <h3>{t.availability}</h3>
-        <div
-          className="reservation-calendar-views"
-          role="group"
-          aria-label={t.calendarView}
-        >
-          <button
-            type="button"
-            aria-pressed={!isMonth}
-            onClick={() => onChangeView("week")}
-          >
-            {t.week}
-          </button>
-          <button
-            type="button"
-            aria-pressed={isMonth}
-            onClick={() => onChangeView("month")}
-          >
-            {t.month}
-          </button>
-        </div>
+        <h3>{copy.availability}</h3>
       </div>
       <div className="reservation-calendar-header reservation-period-header">
-        <p aria-live="polite">
-          {isMonth
-            ? monthLabel
-            : `${formatLondonDay(periodStart, locale)} – ${formatLondonDay(addCalendarDays(periodEnd, -1), locale)}`}
-        </p>
         <div className="reservation-week-controls">
           <button
             type="button"
-            aria-label={isMonth ? t.previousMonth : t.previousWeek}
+            aria-label={copy.previousWeek}
             onClick={() => movePeriod(-1)}
           >
             ‹
           </button>
+          <p aria-live="polite">{weekLabel}</p>
           <button
             type="button"
-            aria-label={isMonth ? t.nextMonth : t.nextWeek}
+            aria-label={copy.nextWeek}
+            disabled={periodEnd > lastDay}
             onClick={() => movePeriod(1)}
           >
             ›
@@ -138,39 +91,50 @@ export function ReservationCalendar({
         </div>
       </div>
 
-      <div
-        className={
-          isMonth ? "reservation-week reservation-month" : "reservation-week"
-        }
-      >
-        {isMonth &&
-          weekdays.map((date) => (
-            <span className="reservation-weekday" key={date} aria-hidden="true">
-              {formatWeekday(date)}
-            </span>
-          ))}
+      <div className="reservation-week">
         {dates.map((date) => {
-          const count = bookingsOn(date).length;
+          const occupancy = bookings ? getDayOccupancy(date, bookings) : null;
+          const count = occupancy?.bookings.length ?? 0;
           const isPast = date < today;
+          const isTooFar = date > lastDay;
           return (
             <button
               key={date}
               type="button"
-              aria-label={`${formatLondonDay(date, locale)}${isPast ? `, ${t.pastDay}` : ""}${count ? `, ${t.booked}: ${count}` : ""}`}
+              disabled={isTooFar}
+              aria-label={`${formatLondonDay(date, locale)}${isPast ? `, ${copy.pastDay}` : ""}${count ? `, ${copy.booked}: ${count}` : ""}`}
+              aria-description={
+                occupancy
+                  ? `${occupancy.percentage}% ${copy.occupancy}`
+                  : undefined
+              }
               aria-pressed={date === day}
               aria-current={date === today ? "date" : undefined}
               data-past={isPast ? "" : undefined}
-              style={
-                isMonth && date === periodStart
-                  ? { gridColumnStart: weekdays.indexOf(date) + 1 }
-                  : undefined
-              }
               onClick={() => onChooseDay(date)}
             >
-              {!isMonth && <span>{formatWeekday(date)}</span>}
+              <span className="reservation-day-label">
+                {date === today ? copy.today : formatWeekday(date)}
+              </span>
               <strong>{Number(date.slice(-2))}</strong>
-              {count > 0 && (
-                <span className="reservation-booked-count">{count}</span>
+              {occupancy && (
+                <>
+                  <span
+                    className="reservation-occupancy-bar"
+                    aria-hidden="true"
+                  >
+                    <span style={{ width: `${occupancy.percentage}%` }} />
+                  </span>
+                  <span
+                    className="reservation-occupancy-label"
+                    aria-hidden="true"
+                  >
+                    {occupancy.percentage}%{" "}
+                    <span className="reservation-occupancy-word">
+                      {copy.occupancy}
+                    </span>
+                  </span>
+                </>
               )}
             </button>
           );
@@ -180,19 +144,20 @@ export function ReservationCalendar({
       {bookings && (
         <div className="reservation-day-bookings">
           <strong>{formatLondonDay(day, locale)}</strong>
-          {day < today && <p>{t.pastDayDetails}</p>}
+          {day < today && <p>{copy.pastDayDetails}</p>}
           {selectedBookings.length > 0 ? (
             <ul>
               {selectedBookings.map(({ startAt, endAt }) => (
                 <li key={startAt}>
                   <span className="reservation-booked-dot" aria-hidden="true" />
-                  {t.booked} · {formatLondonDateTime(startAt, locale, hour12)} –{" "}
+                  {copy.booked} ·{" "}
+                  {formatLondonDateTime(startAt, locale, hour12)} –{" "}
                   {formatLondonDateTime(endAt, locale, hour12)}
                 </li>
               ))}
             </ul>
           ) : (
-            <p>{t.free}</p>
+            <p>{copy.free}</p>
           )}
         </div>
       )}

@@ -1,12 +1,20 @@
 import {
   getChargingWindowRange,
   getEnergyMixFetchRange,
-  getEnergyMixTargetDates
+  getEnergyMixTargetDates,
+  getLastBookableDay
 } from "../src/services/date.service";
 
 describe("date service", () => {
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  it("allows bookings up to the same day next month, clamped to its end", () => {
+    expect(getLastBookableDay("2026-07-16")).toBe("2026-08-16");
+    expect(getLastBookableDay("2026-12-20")).toBe("2027-01-20");
+    expect(getLastBookableDay("2026-01-31")).toBe("2026-02-28");
+    expect(getLastBookableDay("2026-08-31")).toBe("2026-09-30");
   });
 
   it("uses the London calendar date after 23:00 UTC in summer", () => {

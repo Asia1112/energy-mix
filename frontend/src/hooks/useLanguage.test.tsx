@@ -1,4 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
+import { LanguageProvider } from "../i18n/LanguageProvider";
 import { translations } from "../i18n/i18n";
 import { useLanguage } from "./useLanguage";
 
@@ -9,7 +10,9 @@ describe("useLanguage", () => {
   });
 
   it("uses Polish by default and persists document language", () => {
-    const { result } = renderHook(() => useLanguage());
+    const { result } = renderHook(() => useLanguage(), {
+      wrapper: LanguageProvider
+    });
 
     expect(result.current.language).toBe("pl");
     expect(result.current.t).toBe(translations.pl);
@@ -20,7 +23,9 @@ describe("useLanguage", () => {
   it("reads a saved language", () => {
     localStorage.setItem("language", "en");
 
-    const { result } = renderHook(() => useLanguage());
+    const { result } = renderHook(() => useLanguage(), {
+      wrapper: LanguageProvider
+    });
 
     expect(result.current.language).toBe("en");
     expect(result.current.t).toBe(translations.en);
@@ -29,13 +34,17 @@ describe("useLanguage", () => {
   it("falls back to Polish for unsupported saved language", () => {
     localStorage.setItem("language", "de");
 
-    const { result } = renderHook(() => useLanguage());
+    const { result } = renderHook(() => useLanguage(), {
+      wrapper: LanguageProvider
+    });
 
     expect(result.current.language).toBe("pl");
   });
 
   it("toggles language and updates localStorage and document lang", () => {
-    const { result } = renderHook(() => useLanguage());
+    const { result } = renderHook(() => useLanguage(), {
+      wrapper: LanguageProvider
+    });
 
     act(() => {
       result.current.toggleLanguage();

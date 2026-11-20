@@ -1,8 +1,8 @@
+import type { Booking } from "../api/reservationApi";
 import { LONDON_TIME_ZONE } from "./londonDate";
 
 const SLOT_MS = 30 * 60_000;
 export const WEEK_DAYS = 7;
-export type CalendarView = "week" | "month";
 
 const dayFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: LONDON_TIME_ZONE,
@@ -14,26 +14,18 @@ const offsetFormatter = new Intl.DateTimeFormat("en-GB", {
   timeZone: LONDON_TIME_ZONE,
   timeZoneName: "longOffset"
 });
+const clockFormatter = new Intl.DateTimeFormat("en-GB", {
+  timeZone: LONDON_TIME_ZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23"
+});
 
 export function getLondonDay(instant: Date): string {
   const { year, month, day } = Object.fromEntries(
     dayFormatter.formatToParts(instant).map(({ type, value }) => [type, value])
   );
   return `${year}-${month}-${day}`;
-}
-
-export function parseReservationDate(value: string): string | null {
-  const text = value.trim().replace(/^(\d{2})(\d{2})(\d{4})$/, "$1/$2/$3");
-  const parts = /^(\d{1,2})([./-])(\d{1,2})\2([1-9]\d{3})$/.exec(text);
-  if (!parts) return null;
-
-  const [, day, , month, year] = parts;
-  const date = `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-  const instant = new Date(`${date}T00:00:00Z`);
-  return Number.isFinite(instant.getTime()) &&
-    instant.toISOString().slice(0, 10) === date
-    ? date
-    : null;
 }
 
 export function addCalendarDays(day: string, count: number): string {
@@ -47,13 +39,13 @@ export function getWeekStart(day: string): string {
   return addCalendarDays(day, -((weekday + 6) % WEEK_DAYS));
 }
 
-export function getMonthStart(day: string): string {
-  return `${day.slice(0, 7)}-01`;
-}
-
-export function addCalendarMonths(monthStart: string, count: number): string {
-  const date = new Date(`${monthStart}T00:00:00Z`);
-  date.setUTCMonth(date.getUTCMonth() + count);
+// Keep in sync with getLastBookableDay in backend/src/services/date.service.ts.
+export function getLastBookableDay(today: string): string {
+  const date = new Date(`${today}T00:00:00Z`);
+  const month = date.getUTCMonth() + 1;
+  date.setUTCMonth(month);
+  // 31 Jan + 1 month overflows into March: clamp to the end of February.
+  if (date.getUTCMonth() !== month % 12) date.setUTCDate(0);
   return date.toISOString().slice(0, 10);
 }
 
@@ -74,4 +66,34 @@ export function getStartTimes(day: string, now: number): string[] {
     if (time > now) times.push(new Date(time).toISOString());
   }
   return times;
+}
+
+// The same London clock time on another day, or "" when that day skips it.
+export function moveTimeToDay(time: string, day: string): string {
+  if (!time) return "";
+  const clock = clockFormatter.format(new Date(time));
+  return (
+    getStartTimes(day, -Infinity).find(
+      (candidate) => clockFormatter.format(new Date(candidate)) === clock
+    ) ?? ""
+  );
+}
+
+export function getDayOccupancy(day: string, bookings: Booking[]) {
+  const start = Date.parse(londonMidnight(day));
+  const end = Date.parse(londonMidnight(addCalendarDays(day, 1)));
+  const intervals = bookings.flatMap((booking) => {
+    const overlap =
+      Math.min(end, Date.parse(booking.endAt)) -
+      Math.max(start, Date.parse(booking.startAt));
+    return overlap > 0 ? [{ booking, overlap }] : [];
+  });
+
+  return {
+    bookings: intervals.map(({ booking }) => booking),
+    percentage: Math.round(
+      (100 * intervals.reduce((total, { overlap }) => total + overlap, 0)) /
+        (end - start)
+    )
+  };
 }

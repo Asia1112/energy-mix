@@ -1,4 +1,5 @@
 import axios from "axios";
+import { api } from "./apiClient";
 
 export interface Charger {
   id: string;
@@ -17,17 +18,30 @@ export interface Reservation extends Booking {
   cancelledAt: string | null;
 }
 
-interface ReservationInput {
+export interface ReservationInput {
   chargerId: string;
   startAt: string;
   durationHours: number;
 }
 
-const api = axios.create({ baseURL: "/api", timeout: 10000 });
 let pendingSession: Promise<void> | undefined;
 
 export function reservationErrorStatus(error: unknown): number | undefined {
   return axios.isAxiosError(error) ? error.response?.status : undefined;
+}
+
+export function reservationErrorCode(error: unknown): string | undefined {
+  return axios.isAxiosError<{ code?: string }>(error)
+    ? error.response?.data?.code
+    : undefined;
+}
+
+export function isReservationConfigError(error: unknown): boolean {
+  return (
+    axios.isAxiosError<{ code?: string }>(error) &&
+    error.response?.status === 503 &&
+    reservationErrorCode(error) === "RESERVATIONS_NOT_CONFIGURED"
+  );
 }
 
 function startSession(): Promise<void> {

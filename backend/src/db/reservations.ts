@@ -87,12 +87,26 @@ export async function cancelReservation(
   pool: Pool,
   ownerId: string,
   reservationId: string
-): Promise<boolean> {
-  const result = await pool.query(
-    `UPDATE reservations
-     SET cancelled_at = COALESCE(cancelled_at, clock_timestamp())
-     WHERE id = $1 AND owner_id = $2`,
+): Promise<"cancelled" | "started" | "not-found"> {
+  const { rows } = await pool.query<{ cancellable: boolean }>(
+    `WITH target AS (
+       SELECT id,
+              cancelled_at IS NOT NULL
+                OR start_at > statement_timestamp() AS cancellable
+       FROM reservations
+       WHERE id = $1 AND owner_id = $2
+       FOR UPDATE
+     ), cancelled AS (
+       UPDATE reservations
+       SET cancelled_at = COALESCE(reservations.cancelled_at, statement_timestamp())
+       FROM target
+       WHERE reservations.id = target.id AND target.cancellable
+     )
+     SELECT cancellable FROM target`,
     [reservationId, ownerId]
   );
-  return result.rowCount === 1;
+  if (rows.length === 0) {
+    return "not-found";
+  }
+  return rows[0].cancellable ? "cancelled" : "started";
 }

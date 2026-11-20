@@ -1,6 +1,7 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { getChargingWindow } from "../../api/energyApi";
 import { translations } from "../../i18n/i18n";
+import { renderWithProviders } from "../../test/renderWithProviders";
 import { ChargingForm } from "./ChargingForm";
 
 vi.mock("../../api/energyApi", () => ({
@@ -15,7 +16,7 @@ describe("ChargingForm", () => {
   });
 
   it("keeps the input empty while the user deletes the current value", () => {
-    render(<ChargingForm t={translations.pl} />);
+    renderWithProviders(<ChargingForm />, "pl");
 
     const input = screen.getByRole("spinbutton") as HTMLInputElement;
 
@@ -25,7 +26,7 @@ describe("ChargingForm", () => {
   });
 
   it("shows validation and does not call the API for an empty value", () => {
-    render(<ChargingForm t={translations.pl} />);
+    renderWithProviders(<ChargingForm />, "pl");
 
     const input = screen.getByRole("spinbutton");
     fireEvent.change(input, { target: { value: "" } });
@@ -40,7 +41,7 @@ describe("ChargingForm", () => {
   });
 
   it("shows validation in English when English translations are active", () => {
-    render(<ChargingForm t={translations.en} />);
+    renderWithProviders(<ChargingForm />, "en");
 
     const input = screen.getByRole("spinbutton");
     fireEvent.change(input, { target: { value: "8" } });
@@ -55,7 +56,7 @@ describe("ChargingForm", () => {
   });
 
   it("shows validation and does not call the API for decimal hours", () => {
-    render(<ChargingForm t={translations.en} />);
+    renderWithProviders(<ChargingForm />, "en");
 
     const input = screen.getByRole("spinbutton");
     fireEvent.change(input, { target: { value: "1.5" } });
@@ -76,7 +77,7 @@ describe("ChargingForm", () => {
       averageCleanEnergyPercentage: 82.5
     });
 
-    render(<ChargingForm t={translations.pl} />);
+    renderWithProviders(<ChargingForm />, "pl");
 
     fireEvent.change(screen.getByRole("spinbutton"), {
       target: { value: "3" }
@@ -86,18 +87,21 @@ describe("ChargingForm", () => {
     );
 
     await waitFor(() => {
-      expect(mockedGetChargingWindow).toHaveBeenCalledWith(3);
+      expect(mockedGetChargingWindow).toHaveBeenCalledWith(
+        3,
+        expect.any(AbortSignal)
+      );
     });
 
-    expect(screen.getByText("82.5%")).toBeInTheDocument();
-    expect(screen.getByText(/01:00 BST$/)).toBeInTheDocument();
-    expect(screen.getByText(/04:00 BST$/)).toBeInTheDocument();
+    expect(await screen.findByText("82.5%")).toBeInTheDocument();
+    expect(screen.getByText(/01:00$/)).toBeInTheDocument();
+    expect(screen.getByText(/04:00$/)).toBeInTheDocument();
   });
 
   it("shows a request error when charging window calculation fails", async () => {
     mockedGetChargingWindow.mockRejectedValueOnce(new Error("network"));
 
-    render(<ChargingForm t={translations.en} />);
+    renderWithProviders(<ChargingForm />, "en");
 
     fireEvent.click(
       screen.getByRole("button", { name: translations.en.chargingSubmit })
@@ -106,6 +110,32 @@ describe("ChargingForm", () => {
     expect(
       await screen.findByText(translations.en.chargingError)
     ).toBeInTheDocument();
+  });
+
+  it("reuses a fresh result for the same length and asks again after an error", async () => {
+    mockedGetChargingWindow
+      .mockRejectedValueOnce(new Error("network"))
+      .mockResolvedValue({
+        start: "2026-07-04T00:00:00Z",
+        end: "2026-07-04T03:00:00Z",
+        averageCleanEnergyPercentage: 82.5
+      });
+    renderWithProviders(<ChargingForm />, "en");
+    const submit = () =>
+      fireEvent.click(
+        screen.getByRole("button", { name: translations.en.chargingSubmit })
+      );
+
+    submit();
+    expect(
+      await screen.findByText(translations.en.chargingError)
+    ).toBeInTheDocument();
+
+    submit();
+    expect(await screen.findByText("82.5%")).toBeInTheDocument();
+    submit();
+    expect(screen.getByText("82.5%")).toBeInTheDocument();
+    expect(mockedGetChargingWindow).toHaveBeenCalledTimes(2);
   });
 
   it("shows a loading spinner while calculating the charging window", async () => {
@@ -118,7 +148,7 @@ describe("ChargingForm", () => {
       })
     );
 
-    render(<ChargingForm t={translations.en} />);
+    renderWithProviders(<ChargingForm />, "en");
 
     fireEvent.click(
       screen.getByRole("button", { name: translations.en.chargingSubmit })

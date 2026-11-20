@@ -1,38 +1,6 @@
 export type Language = "pl" | "en";
 
-export interface Translations {
-  themeToggleLabel: string;
-  themeDark: string;
-  themeLight: string;
-  themeDarkButton: string;
-  themeLightButton: string;
-  languageToggleLabel: string;
-  languageToggleText: string;
-  dateLocale: string;
-  dateHour12: boolean;
-  legendLabel: string;
-  appDescription: string;
-  loading: string;
-  retry: string;
-  energyMixError: string;
-  emptyState: string;
-  cleanEnergy: string;
-  cleanestDay: string;
-  chargingTitle: string;
-  chargingDescription: string;
-  chargingTime: string;
-  chargingHint: string;
-  chargingSubmit: string;
-  chargingLoading: string;
-  chargingValidation: string;
-  chargingError: string;
-  resultStart: string;
-  resultEnd: string;
-  resultAverageCleanEnergy: string;
-  reserveChargingWindow: string;
-}
-
-export const translations: Record<Language, Translations> = {
+export const translations = {
   pl: {
     themeToggleLabel: "Włącz tryb",
     themeDark: "ciemny",
@@ -64,7 +32,63 @@ export const translations: Record<Language, Translations> = {
     resultStart: "Start",
     resultEnd: "Koniec",
     resultAverageCleanEnergy: "Średni udział czystej energii",
-    reserveChargingWindow: "Zarezerwuj ten termin"
+    reserveChargingWindow: "Zarezerwuj ten termin",
+    reservations: {
+      title: "Rezerwacje ładowarek",
+      charger: "Ładowarka",
+      time: "Start (czas londyński)",
+      duration: "Czas rezerwacji",
+      chooseTime: "Wybierz godzinę",
+      noTimes: "Brak przyszłych godzin",
+      hours: "godz.",
+      reserve: "Zarezerwuj",
+      today: "dziś",
+      occupancy: "zajęte",
+      summary: "Twoja rezerwacja",
+      summaryDay: "Dzień",
+      summaryHours: "Godziny (czas Londynu)",
+      summaryDuration: "Czas trwania",
+      slotAvailability: {
+        idle: "Wybierz godzinę rozpoczęcia.",
+        checking: "Sprawdzanie dostępności…",
+        available: "Termin wolny – możesz rezerwować.",
+        booked: "Wybrany termin jest zajęty.",
+        error: "Nie udało się sprawdzić dostępności."
+      },
+      availability: "Kalendarz zajętych terminów",
+      previousWeek: "Poprzedni tydzień",
+      nextWeek: "Następny tydzień",
+      booked: "Zajęte",
+      pastDay: "termin minął",
+      pastDayDetails: "Tego dnia nie można już zarezerwować.",
+      free: "Brak zajętych terminów tego dnia.",
+      loading: "Ładowanie…",
+      loadingChargersError: "Nie udało się pobrać ładowarek.",
+      missingConfig:
+        "Moduł rezerwacji jest niedostępny. Sprawdź ustawienia DATABASE_URL i RESERVATION_SESSION_SECRET na backendzie.",
+      loadingBookingsError: "Nie udało się pobrać zajętych terminów.",
+      loadingReservationsError: "Nie udało się pobrać Twoich rezerwacji.",
+      bookingBlocked:
+        "Rezerwacja jest chwilowo niedostępna, bo nie udało się pobrać Twoich rezerwacji.",
+      noChargers: "Brak dostępnych ładowarek.",
+      mine: "Moje rezerwacje",
+      empty: "Nie masz jeszcze rezerwacji.",
+      cancel: "Anuluj rezerwację",
+      cancelled: "Anulowana",
+      completed: "Zakończona",
+      inProgress: "W trakcie",
+      created: "Ładowarka zarezerwowana.",
+      removed: "Rezerwacja anulowana.",
+      occupied:
+        "Wybrana ładowarka jest zajęta w tym terminie. Wybierz inną godzinę lub ładowarkę.",
+      invalidTime: "Wybierz godzinę w przyszłości.",
+      tooFar: "Ładowarkę można zarezerwować maksymalnie miesiąc do przodu.",
+      createError: "Nie udało się utworzyć rezerwacji.",
+      cancelError: "Nie udało się anulować rezerwacji.",
+      startedCancel: "Rezerwację można anulować tylko przed jej rozpoczęciem.",
+      sessionError:
+        "Sesja wygasła. Odśwież stronę, aby ponownie załadować rezerwacje."
+    }
   },
   en: {
     themeToggleLabel: "Turn on",
@@ -97,9 +121,67 @@ export const translations: Record<Language, Translations> = {
     resultStart: "Start",
     resultEnd: "End",
     resultAverageCleanEnergy: "Average clean energy share",
-    reserveChargingWindow: "Book this time"
+    reserveChargingWindow: "Book this time",
+    reservations: {
+      title: "Charger reservations",
+      charger: "Charger",
+      time: "Start (London time)",
+      duration: "Reservation duration",
+      chooseTime: "Choose a time",
+      noTimes: "No future start times",
+      hours: "h",
+      reserve: "Book charger",
+      today: "today",
+      occupancy: "booked",
+      summary: "Your reservation",
+      summaryDay: "Day",
+      summaryHours: "Hours (London time)",
+      summaryDuration: "Duration",
+      slotAvailability: {
+        idle: "Choose a start time.",
+        checking: "Checking availability…",
+        available: "This time is available.",
+        booked: "This time is already booked.",
+        error: "Could not check availability."
+      },
+      availability: "Booked times calendar",
+      previousWeek: "Previous week",
+      nextWeek: "Next week",
+      booked: "Booked",
+      pastDay: "past date",
+      pastDayDetails: "This date can no longer be booked.",
+      free: "No bookings on this day.",
+      loading: "Loading…",
+      loadingChargersError: "Could not load chargers.",
+      missingConfig:
+        "Reservations are unavailable. Check DATABASE_URL and RESERVATION_SESSION_SECRET on the backend.",
+      loadingBookingsError: "Could not load booked times.",
+      loadingReservationsError: "Could not load your reservations.",
+      bookingBlocked:
+        "Booking is unavailable because your reservations could not be loaded.",
+      noChargers: "No chargers available.",
+      mine: "My reservations",
+      empty: "You have no reservations yet.",
+      cancel: "Cancel reservation",
+      cancelled: "Cancelled",
+      completed: "Completed",
+      inProgress: "In progress",
+      created: "Charger booked.",
+      removed: "Reservation cancelled.",
+      occupied:
+        "This charger is booked at the selected time. Choose another time or charger.",
+      invalidTime: "Choose a start time in the future.",
+      tooFar: "A charger can be booked up to one month ahead.",
+      createError: "Could not create the reservation.",
+      cancelError: "Could not cancel the reservation.",
+      startedCancel: "Reservations can only be cancelled before they start.",
+      sessionError:
+        "Your session expired. Refresh the page to load your reservations again."
+    }
   }
 };
+
+export type Translations = (typeof translations)[Language];
 
 export function isLanguage(value: string | null): value is Language {
   return value === "pl" || value === "en";

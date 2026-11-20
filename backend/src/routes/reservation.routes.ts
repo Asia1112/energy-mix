@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import { Router, type ErrorRequestHandler, type RequestHandler } from "express";
 import { DatabaseError, type Pool } from "pg";
 import { MAX_CHARGING_HOURS, MIN_CHARGING_HOURS } from "../config/charging";
+import { getLastBookableDay, getLondonDate } from "../services/date.service";
 import {
   cancelReservation,
   createReservation,
@@ -164,6 +165,15 @@ export function createReservationRouter({
     }
 
     const end = new Date(start.getTime() + durationHours * HOUR_MS);
+    // The end is exclusive, so a session ending at midnight stays on its day.
+    const lastDay = getLastBookableDay(getLondonDate(new Date()));
+    if (getLondonDate(new Date(end.getTime() - 1)) > lastDay) {
+      return res.status(400).json({
+        code: "TOO_FAR_AHEAD",
+        message: "Reservations can be made up to one month ahead."
+      });
+    }
+
     const reservation = await createReservation(
       pool,
       res.locals.ownerId,
@@ -179,12 +189,18 @@ export function createReservationRouter({
     requireSameOriginWrite,
     async (req, res) => {
       const id = req.params.id;
-      if (
-        typeof id !== "string" ||
-        !UUID_PATTERN.test(id) ||
-        !(await cancelReservation(pool, res.locals.ownerId, id))
-      ) {
+      if (typeof id !== "string" || !UUID_PATTERN.test(id)) {
         return res.status(404).json({ message: "Reservation not found." });
+      }
+
+      const result = await cancelReservation(pool, res.locals.ownerId, id);
+      if (result === "not-found") {
+        return res.status(404).json({ message: "Reservation not found." });
+      }
+      if (result === "started") {
+        return res.status(409).json({
+          message: "Reservations that have started cannot be cancelled."
+        });
       }
       res.sendStatus(204);
     }

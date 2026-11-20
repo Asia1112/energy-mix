@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { getEnergyMix } from "../api/energyApi";
 import type { DailyEnergyMix } from "../api/energyApi";
+import { AppProviders } from "../AppProviders";
 import { useEnergyMix } from "./useEnergyMix";
 
 vi.mock("../api/energyApi", () => ({
@@ -17,11 +18,24 @@ describe("useEnergyMix", () => {
   it("starts in a loading state", () => {
     mockedGetEnergyMix.mockReturnValueOnce(new Promise(() => undefined));
 
-    const { result } = renderHook(() => useEnergyMix());
+    const { result } = renderHook(() => useEnergyMix(), {
+      wrapper: AppProviders
+    });
 
     expect(result.current.loading).toBe(true);
     expect(result.current.energyMix).toEqual([]);
     expect(result.current.error).toBe(false);
+  });
+
+  it("aborts the request on unmount", () => {
+    mockedGetEnergyMix.mockReturnValueOnce(new Promise(() => undefined));
+    const { unmount } = renderHook(() => useEnergyMix(), {
+      wrapper: AppProviders
+    });
+    const signal = mockedGetEnergyMix.mock.calls[0][0];
+    expect(signal.aborted).toBe(false);
+    unmount();
+    expect(signal.aborted).toBe(true);
   });
 
   it("populates data after a successful request", async () => {
@@ -35,7 +49,9 @@ describe("useEnergyMix", () => {
 
     mockedGetEnergyMix.mockResolvedValueOnce(energyMix);
 
-    const { result } = renderHook(() => useEnergyMix());
+    const { result } = renderHook(() => useEnergyMix(), {
+      wrapper: AppProviders
+    });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -48,7 +64,9 @@ describe("useEnergyMix", () => {
   it("sets error when loading fails", async () => {
     mockedGetEnergyMix.mockRejectedValueOnce(new Error("network"));
 
-    const { result } = renderHook(() => useEnergyMix());
+    const { result } = renderHook(() => useEnergyMix(), {
+      wrapper: AppProviders
+    });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -70,7 +88,9 @@ describe("useEnergyMix", () => {
       .mockRejectedValueOnce(new Error("network"))
       .mockResolvedValueOnce(energyMix);
 
-    const { result } = renderHook(() => useEnergyMix());
+    const { result } = renderHook(() => useEnergyMix(), {
+      wrapper: AppProviders
+    });
 
     await waitFor(() => {
       expect(result.current.error).toBe(true);
@@ -80,7 +100,7 @@ describe("useEnergyMix", () => {
       await result.current.retry();
     });
 
-    expect(result.current.energyMix).toEqual(energyMix);
+    await waitFor(() => expect(result.current.energyMix).toEqual(energyMix));
     expect(result.current.error).toBe(false);
     expect(mockedGetEnergyMix).toHaveBeenCalledTimes(2);
   });
